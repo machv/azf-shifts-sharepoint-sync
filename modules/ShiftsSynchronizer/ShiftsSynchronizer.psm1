@@ -243,11 +243,7 @@ function Get-UserDetails
     )
 
     $uri = "https://graph.microsoft.com/v1.0/users/{0}" -f $UserId
-    #$userResponse = Invoke-RestMethod -Method Get -Headers $Token -Uri $uri
-    #region Debugging only
-    $userResponse = Get-Content -Path "E:\MSFT\Engagements\nemji\Shifts sync\Dummy data 2\user_$($UserId).json" | ConvertFrom-Json
-    $userResponse.userPrincipalName = $userResponse.userPrincipalName.Replace("@nemji.cz", "@m365x074331.onmicrosoft.com")
-    #endregion
+    $userResponse = Invoke-RestMethod -Method Get -Headers $Token -Uri $uri
 
     $userResponse
 }
@@ -266,8 +262,7 @@ function Get-Shifts
     )
     $ci = [CultureInfo]::InvariantCulture
     $uri = "https://graph.microsoft.com/beta/teams/{0}/schedule/shifts?`$filter=sharedShift/startDateTime ge {1}T00:00:00.000Z and sharedShift/endDateTime le {2}T00:00:00.000Z" -f $TeamId, $StartDate.ToString("yyyy-MM-dd", $ci), $EndDate.ToString("yyyy-MM-dd", $ci)
-    #$response = Invoke-RestMethod -Method Get -Headers $Token -Uri $uri
-    $response = Get-Content "E:\MSFT\Engagements\nemji\Shifts sync\Dummy data 2\shifts.json" | ConvertFrom-Json
+    $response = Invoke-RestMethod -Method Get -Headers $Token -Uri $uri
     
     $response.value
 }
@@ -382,8 +377,6 @@ function Complete-ShiftEvent
         $ExistingItems
 
     )
-
-    Wait-Debugger
 
     $user = Get-UserDetails -Token $GraphToken -UserId $UserId
     $spUser = Invoke-EnsureSpUser -User $user -Site $Site -Token $SharePointToken

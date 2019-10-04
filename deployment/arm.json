@@ -1,0 +1,228 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "appName": {
+            "type": "String"
+        },
+        "storageAccountName": {
+            "type": "String"
+        },
+        "location": {
+            "type": "String"
+        },
+        "resourceGroup": {
+            "type": "String"
+        },
+        "appTenantName": {
+            "type": "String"
+        },
+        "appApplicationId": {
+            "type": "String"
+        },
+        "appTeamsTeamName": {
+            "type": "String"
+        },
+        "appSharePointSiteUrl": {
+            "type": "String"
+        },
+        "appSharePointListName": {
+            "type": "String"
+        },
+        "appSharePointResourcePrincipal": {
+            "type": "String"
+        },
+        "userGuid": {
+            "type": "String"
+        },
+        "keyVaultName": {
+            "type": "String"
+        }
+    },
+    "variables": {
+        "storageAccountName": "[parameters('storageAccountName')]",
+        "hostingEnvironment": "",
+        "hostingPlanName": "[concat(parameters('appName'),'-asp')]",
+        "sku": "Dynamic",
+        "skuCode": "Y1",
+        "workerSize": "0",
+        "workerSizeId": "0",
+        "numberOfWorkers":"1",
+        "keyVaultName": "[parameters('keyVaultName')]",
+        "keyVaultSku": "Standard",
+        "keyVaultNetworkAcls": {
+            "defaultAction": "Allow",
+            "bypass": "AzureServices",
+            "ipRules": [],
+            "virtualNetworkRules": []
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2018-02-01",
+            "name": "[parameters('appName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Web/serverfarms/', variables('hostingPlanName'))]",
+                "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]"
+            ],
+            "tags": {},
+            "kind": "functionapp",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "name": "[parameters('appName')]",
+                "siteConfig": {
+                    "appSettings": [
+                        {
+                            "name": "FUNCTIONS_WORKER_RUNTIME",
+                            "value": "powershell"
+                        },
+                        {
+                            "name": "FUNCTIONS_EXTENSION_VERSION",
+                            "value": "~2"
+                        },
+                        {
+                            "name": "AzureWebJobsStorage",
+                            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2019-06-01').keys[0].value,';EndpointSuffix=','core.windows.net')]"
+                        },
+                        {
+                            "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+                            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2019-06-01').keys[0].value,';EndpointSuffix=','core.windows.net')]"
+                        },
+                        {
+                            "name": "WEBSITE_CONTENTSHARE",
+                            "value": "[concat(toLower(parameters('appName')), 'b134')]"
+                        },
+                        {
+                            "name": "REFRESH_TOKEN",
+                            "value": ""
+                        },
+                        {
+                            "name": "APPLICATION_SECRET",
+                            "value": ""
+                        },
+                        {
+                            "name": "TENANT_NAME",
+                            "value": "[parameters('appTenantName')]"
+                        },
+                        {
+                            "name": "APPLICATION_ID",
+                            "value": "[parameters('appApplicationId')]"
+                        },
+                        {
+                            "name": "TEAMS_NAME",
+                            "value": "[parameters('appTeamsTeamName')]"
+                        },
+                        {
+                            "name": "SP_SITE",
+                            "value": "[parameters('appSharePointSiteUrl')]"
+                        },
+                        {
+                            "name": "SP_LIST",
+                            "value": "[parameters('appSharePointListName')]"
+                        },
+                        {
+                            "name": "SP_RESOURCE_PRINCIPAL",
+                            "value": "[parameters('appSharePointResourcePrincipal')]"
+                        }
+                    ]
+                },
+                "serverFarmId": "[concat('/subscriptions/', subscription().subscriptionId, '/resourcegroups/', parameters('resourceGroup'), '/providers/Microsoft.Web/serverfarms/', variables('hostingPlanName'))]",
+                "hostingEnvironment": "[variables('hostingEnvironment')]",
+                "clientAffinityEnabled": true
+            }
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2018-02-01",
+            "name": "[variables('hostingPlanName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [],
+            "tags": {},
+            "sku": {
+                "Tier": "[variables('sku')]",
+                "Name": "[variables('skuCode')]"
+            },
+            "kind": "",
+            "properties": {
+                "name": "[variables('hostingPlanName')]",
+                "workerSize": "[variables('workerSize')]",
+                "workerSizeId": "[variables('workerSizeId')]",
+                "numberOfWorkers": "[variables('numberOfWorkers')]",
+                "hostingEnvironment": "[variables('hostingEnvironment')]"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2019-06-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "properties": {
+                "supportsHttpsTrafficOnly": true
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults",
+            "apiVersion": "2016-10-01",
+            "name": "[variables('keyVaultName')]",
+            "location": "[parameters('location')]",
+            "tags": {},
+            "properties": {
+                "enabledForDeployment": false,
+                "enabledForTemplateDeployment": false,
+                "enabledForDiskEncryption": false,
+                "tenantId": "[subscription().tenantid]",
+                "sku": {
+                    "name": "[variables('keyVaultSku')]",
+                    "family": "A"
+                },
+                "networkAcls": "[variables('keyVaultNetworkAcls')]",
+                "accessPolicies": [
+                    {
+                        "objectId": "[reference(concat('Microsoft.Web/sites/', parameters('appName')), '2018-02-01', 'Full').identity.principalId]",
+                        "tenantId": "[subscription().tenantid]",
+                        "permissions": {
+                            "keys": [],
+                            "secrets": [
+                                "Get"
+                            ],
+                            "certificates": []
+                        }
+                    },
+                    {
+                        "objectId": "[parameters('userGuid')]",
+                        "tenantId": "[subscription().tenantid]",
+                        "permissions": {
+                            "keys": [],
+                            "secrets": [
+                                "Get",
+                                "List",
+                                "Set",
+                                "Delete",
+                                "Recover",
+                                "Backup",
+                                "Restore"
+                            ],
+                            "certificates": []
+                        }
+                    }
+                ]
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Web/sites/', parameters('appName'))]"
+            ]
+        }
+    ],
+    "outputs": {  
+        "keyVaultResourceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+        }
+    }
+}
