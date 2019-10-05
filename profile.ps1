@@ -51,8 +51,6 @@ function Invoke-Synchronization
                             -ShortenLastDay $true `
                             -Debug:$true
 
-    #Wait-Debugger
-
     $scriptDuration = (Get-Date) - $functionStartedAt
     $message = "Synchronization finished after $($scriptDuration.TotalSeconds) seconds."
     Write-Host $message

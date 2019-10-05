@@ -11,11 +11,20 @@ To deploy this app these modules from PowerShell Gallery are needed to be on you
 
 ### Azure AD Application Registration
 
+To avoid conflicts in loading used DLL assemblies by used PowerShell modules (ADAL DLLs), we need to load PowerShell modules manually in expected order.
+
+```powershell
+Import-Module Az.Accounts
+Import-Module AzureAD
+Import-Module OAuth2Toolkit
+```
+
 To use this Function App we first need to have App Registration in Azure AD tenant where the SharePoint Site and Teams team is located.
- 
+
 ```powershell
 $appName = "Shifts to SharePoint Synchronization" # you can change the application name
 
+# You can connect even as a standard user to register an Azure AD Application 
 Connect-AzureAD 
 $session = Get-AzureADCurrentSessionInfo
 
@@ -24,6 +33,7 @@ $currentAadUser = Get-AzureADUser -ObjectId $session.Account
 
 # Required Microsoft Graph permissions for the application
 $resourceAccess = @(
+    # used GUIDs are well-known for each resource. On way to obtain those is to see application definition using Graph Explorer (https://developer.microsoft.com/en-us/graph/graph-explorer)
     New-Object -TypeName "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList "e1fe6dd8-ba31-4d61-89e7-88639da4683d", "Scope" # User.Read
     New-Object -TypeName "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList "5f8c59db-677d-491f-a6b8-5f174b11ec1d", "Scope" # Groups.Read.All
     New-Object -TypeName "Microsoft.Open.AzureAD.Model.ResourceAccess" -ArgumentList "89fe6a52-be36-487e-b7d8-d061c450a026", "Scope" # Sites.ReadWrite.All
@@ -32,7 +42,6 @@ $resourceAccess = @(
 $requiredResourceAccess = New-Object -TypeName "Microsoft.Open.AzureAD.Model.RequiredResourceAccess"
 $requiredResourceAccess.ResourceAppId = "00000003-0000-0000-c000-000000000000" # Microsoft Graph
 $requiredResourceAccess.ResourceAccess = $resourceAccess
-
 
 $app = New-AzureADApplication -DisplayName $appName -ReplyUrls $replyUrls -AvailableToOtherTenants $false -RequiredResourceAccess $requiredResourceAccess
 
@@ -45,6 +54,9 @@ $endDate = $startDate.AddYears(10)
 $secretKey = New-AzureADApplicationPasswordCredential -ObjectId $app.ObjectId -CustomKeyIdentifier "Azure Function App" -StartDate $startDate -EndDate $endDate
 
 # And we need to obtain admin consent for the tenant for this application
+# You need to provide Global Admin credentials for this
+# Make sure that you will wait a few seconds before granting the consent (e. g. 30 secs) 
+# to be sure AAD will be aware of the newly created application 
 Invoke-AdminConsentForApplication -ClientId $app.AppId -RedirectUrl $replyUrls[0] -Tenant $session.TenantDomain
 ```
 
@@ -52,10 +64,10 @@ Invoke-AdminConsentForApplication -ClientId $app.AppId -RedirectUrl $replyUrls[0
 
 As the AAD Application is registered we can now deploy the Function App.
 
-Update corresponding variables and values in `$parameters` hash table to reflect your environment.
+Change values in `$parameters` hash table to reflect your own environment (Teams team, SharePoint list etc.).
 
 ```powershell
-$resourceGroupName = "function-app-rg" # Set your destination resourge group
+$resourceGroupName = "litware-spsync-rg" # Set your destination resourge group
 $location = "West Europe"
 
 Connect-AzAccount
@@ -70,11 +82,8 @@ if(-not $ResourceGroup)
 
 $parameters = @{
     userGuid = $currentUserGuid
-    location = $Location
     resourceGroup = $resourceGroupName
-    appName = "litware-spsync-app"
-    keyVaultName = "litware-spsync-vault"
-    applicationInsightsName = "litware-spsync-insights"
+    namePrefix = "litware-spsync"
     storageAccountName = "litwarespsyncdata"
     appSharePointListName = "Ict-Info"
     appSharePointResourcePrincipal = "https://m365x074331.sharepoint.com"
@@ -83,8 +92,9 @@ $parameters = @{
     appApplicationId = $app.AppId
     appTenantName = $session.TenantDomain
 }
-
-$deployment = New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName -Name $parameters["appName"] -TemplateFile "./deployment/arm.json" -TemplateParameterObject $parameters -SkipTemplateParameterPrompt -Verbose
+$deployment = New-AzResourceGroupDeployment -ResourceGroupName $resourceGroupName -Name $parameters["namePrefix"] -TemplateFile "./deployment/arm.json" -TemplateParameterObject $parameters -SkipTemplateParameterPrompt -Verbose
+$functionAppName = $deployment.Outputs["appName"].Value
+$keyVaultName = $deployment.Outputs["keyVaultName"].Value
 ```
 
 ### Obtain secrets and store them in Key Vault
@@ -100,11 +110,11 @@ $refreshTokenSecureString = ConvertTo-SecureString $response.refresh_token -AsPl
 $clientSecretSecureString = ConvertTo-SecureString $secretKey.Value -AsPlainText -Force
 
 # Store them in a Key Vault
-$refreshTokenSecret = Set-AzKeyVaultSecret -VaultName $parameters["keyVaultName"] -Name 'RefreshToken' -SecretValue $refreshTokenSecureString
-$clientSecretSecret = Set-AzKeyVaultSecret -VaultName $parameters["keyVaultName"] -Name 'ClientSecret' -SecretValue $clientSecretSecureString
+$refreshTokenSecret = Set-AzKeyVaultSecret -VaultName $keyVaultName -Name 'RefreshToken' -SecretValue $refreshTokenSecureString
+$clientSecretSecret = Set-AzKeyVaultSecret -VaultName $keyVaultName -Name 'ClientSecret' -SecretValue $clientSecretSecureString
 
 # And update Function App configuration to use those values from a Key Vault
-$functionApp = Get-AzWebApp -ResourceGroupName $parameters["resourceGroup"] -Name $parameters["appName"]
+$functionApp = Get-AzWebApp -ResourceGroupName $resourceGroupName -Name $functionAppName
 $newAppSettings = @{}
 foreach ($item in $functionApp.SiteConfig.AppSettings)
 {
@@ -113,10 +123,10 @@ foreach ($item in $functionApp.SiteConfig.AppSettings)
 $newAppSettings["REFRESH_TOKEN"] = "@Microsoft.KeyVault(SecretUri=$($refreshTokenSecret.Id))"
 $newAppSettings["APPLICATION_SECRET"] = "@Microsoft.KeyVault(SecretUri=$($clientSecretSecret.Id))"
 
-Set-AzWebApp -ResourceGroupName $parameters["resourceGroup"] -Name $parameters["appName"]  -AppSettings $newAppSettings
+Set-AzWebApp -ResourceGroupName $resourceGroupName -Name $functionAppName -AppSettings $newAppSettings
 ```
 
-### Deploy the Function App
+### Deploy code into the Function App
 
 Finally we can deploy the code itself to Azure Function App.
 

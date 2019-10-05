@@ -3,7 +3,6 @@ using namespace System.Net
 # Input bindings are passed in via param block.
 param($Request, $TriggerMetadata)
 
-# Write to the Azure Functions log stream.
 Write-Host "Starting HTTP triggered Teams to SharePoint synchronization..."
 
 #$environment = ls Env: | Out-String
