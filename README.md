@@ -74,6 +74,7 @@ $parameters = @{
     resourceGroup = $resourceGroupName
     appName = "litware-spsync-app"
     keyVaultName = "litware-spsync-vault"
+    applicationInsightsName = "litware-spsync-insights"
     storageAccountName = "litwarespsyncdata"
     appSharePointListName = "Ict-Info"
     appSharePointResourcePrincipal = "https://m365x074331.sharepoint.com"

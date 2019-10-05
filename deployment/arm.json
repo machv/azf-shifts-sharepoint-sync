@@ -2,7 +2,7 @@
     "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
     "parameters": {
-        "appName": {
+        "namePrefix": {
             "type": "String"
         },
         "storageAccountName": {
@@ -35,20 +35,20 @@
         "userGuid": {
             "type": "String"
         },
-        "keyVaultName": {
+        "applicationInsightsName": {
             "type": "String"
         }
     },
     "variables": {
+        "appName": "[concat(parameters('namePrefix'), '-app')]",
         "storageAccountName": "[parameters('storageAccountName')]",
-        "hostingEnvironment": "",
-        "hostingPlanName": "[concat(parameters('appName'),'-asp')]",
+        "hostingPlanName": "[concat(parameters('namePrefix'),'-asp')]",
+        "keyVaultName": "[concat(parameters('namePrefix'), '-vault')]",
         "sku": "Dynamic",
         "skuCode": "Y1",
         "workerSize": "0",
         "workerSizeId": "0",
         "numberOfWorkers":"1",
-        "keyVaultName": "[parameters('keyVaultName')]",
         "keyVaultSku": "Standard",
         "keyVaultNetworkAcls": {
             "defaultAction": "Allow",
@@ -61,9 +61,10 @@
         {
             "type": "Microsoft.Web/sites",
             "apiVersion": "2018-02-01",
-            "name": "[parameters('appName')]",
+            "name": "[variables('appName')]",
             "location": "[parameters('location')]",
             "dependsOn": [
+                "[concat('microsoft.insights/components/', parameters('applicationInsightsName'))]",
                 "[concat('Microsoft.Web/serverfarms/', variables('hostingPlanName'))]",
                 "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]"
             ],
@@ -73,7 +74,7 @@
                 "type": "SystemAssigned"
             },
             "properties": {
-                "name": "[parameters('appName')]",
+                "name": "[variables('appName')]",
                 "siteConfig": {
                     "appSettings": [
                         {
@@ -94,7 +95,7 @@
                         },
                         {
                             "name": "WEBSITE_CONTENTSHARE",
-                            "value": "[concat(toLower(parameters('appName')), 'b134')]"
+                            "value": "[concat(toLower(variables('appName')), 'b134')]"
                         },
                         {
                             "name": "REFRESH_TOKEN",
@@ -127,11 +128,15 @@
                         {
                             "name": "SP_RESOURCE_PRINCIPAL",
                             "value": "[parameters('appSharePointResourcePrincipal')]"
+                        },
+                        {
+                            "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+                            "value": "[reference(concat('microsoft.insights/components/', parameters('applicationInsightsName')), '2015-05-01').InstrumentationKey]"
                         }
                     ]
                 },
                 "serverFarmId": "[concat('/subscriptions/', subscription().subscriptionId, '/resourcegroups/', parameters('resourceGroup'), '/providers/Microsoft.Web/serverfarms/', variables('hostingPlanName'))]",
-                "hostingEnvironment": "[variables('hostingEnvironment')]",
+                "hostingEnvironment": "",
                 "clientAffinityEnabled": true
             }
         },
@@ -152,7 +157,7 @@
                 "workerSize": "[variables('workerSize')]",
                 "workerSizeId": "[variables('workerSizeId')]",
                 "numberOfWorkers": "[variables('numberOfWorkers')]",
-                "hostingEnvironment": "[variables('hostingEnvironment')]"
+                "hostingEnvironment": ""
             }
         },
         {
@@ -185,7 +190,7 @@
                 "networkAcls": "[variables('keyVaultNetworkAcls')]",
                 "accessPolicies": [
                     {
-                        "objectId": "[reference(concat('Microsoft.Web/sites/', parameters('appName')), '2018-02-01', 'Full').identity.principalId]",
+                        "objectId": "[reference(concat('Microsoft.Web/sites/', variables('appName')), '2018-02-01', 'Full').identity.principalId]",
                         "tenantId": "[subscription().tenantid]",
                         "permissions": {
                             "keys": [],
@@ -215,8 +220,19 @@
                 ]
             },
             "dependsOn": [
-                "[concat('Microsoft.Web/sites/', parameters('appName'))]"
+                "[concat('Microsoft.Web/sites/', variables('appName'))]"
             ]
+        },
+        {
+            "apiVersion": "2015-05-01",
+            "name": "[parameters('applicationInsightsName')]",
+            "type": "microsoft.insights/components",
+            "location": "[parameters('location')]",
+            "tags": {},
+            "properties": {
+                "ApplicationId": "[variables('appName')]",
+                "Request_Source": "IbizaWebAppExtensionCreate"
+            }
         }
     ],
     "outputs": {  
