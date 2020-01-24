@@ -507,6 +507,14 @@ PS>                         -Debug:$true # with verbose logging output
             continue
         }
       
+        # check for duplicate segment
+        $previousShift = $segments | Select-Object -Last 1
+        if($previousShift -and $previousShift.sharedShift.startDateTime -eq $shift.sharedShift.startDateTime -and $previousShift.sharedShift.endDateTime -eq $shift.sharedShift.endDateTime) {
+            # just continue as we don't want to process same time slot again
+            Write-Debug ("Duplicate entry found for user {0} and time slot {1} - {2} -> ignoring" -f $currentUserId, $shift.sharedShift.startDateTime, $shift.sharedShift.endDateTime) 
+            continue
+        }
+
         if($SameDatePartMergingAllowed -and $pendingShiftEnd.Date -eq ([DateTime]$shift.sharedShift.startDateTime).Date) 
         {
             # if Date part is the same, then merge two together
@@ -525,7 +533,7 @@ PS>                         -Debug:$true # with verbose logging output
         }
     }
 
-    # If there any leftovers then save that also
+    # If there any leftovers then save that too
     if($pendingShiftStart) 
     {  
         $spItemId = Complete-ShiftEvent @completeParameters -UserId $currentUserId -StartDate $pendingShiftStart -EndDate $pendingShiftEnd -Segments $segments

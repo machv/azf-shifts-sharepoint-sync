@@ -3,11 +3,24 @@ This PowerShell Function App synchronizes Shifts from Teams to SharePoint Calend
 
 ## Deploy Function App
 
-To deploy this app these modules from PowerShell Gallery are needed to be on your computer installed:
+These PowerShell modules are required to be installed on the machine in order to deploy this app. All of them can be downloaded from the PowerShell Gallery.
 
 - `AzureAD` - to create App Registration
 - `Az` - to deploy Azure resources
 - `OAuth2Toolkit` - to get OAuth2 tokens from Azure AD
+
+```powershell
+Install-Module AzureAD, Az, OAuth2Toolkit
+```
+
+### Required user accounts
+
+| Reason                   | Required rights  |
+| ------------------------ | ---------------- |
+| Service account for sync | User that is Member of a Teams team and RW rights on SharePoint List |
+| Register Azure AD app    | Standard user is enough to manage App Registration |
+| Approve App registration | Global Admin |
+| Deploy function app      | Contributor on a subscription |
 
 ### Azure AD Application Registration
 
@@ -19,13 +32,13 @@ Import-Module AzureAD
 Import-Module OAuth2Toolkit
 ```
 
-To use this Function App we first need to have App Registration in Azure AD tenant where the SharePoint Site and Teams team is located.
+This Function App requires to have an App Registration in the Azure AD tenant where a SharePoint Site and Teams team are.
 
 ```powershell
 $appName = "Shifts to SharePoint Synchronization" # you can change the application name
 
 # You can connect even as a standard user to register an Azure AD Application 
-Connect-AzureAD 
+Connect-AzureAD
 $session = Get-AzureADCurrentSessionInfo
 
 $replyUrls = @("https://localhost:15484/auth")
@@ -60,7 +73,7 @@ $secretKey = New-AzureADApplicationPasswordCredential -ObjectId $app.ObjectId -C
 Invoke-AdminConsentForApplication -ClientId $app.AppId -RedirectUrl $replyUrls[0] -Tenant $session.TenantDomain
 ```
 
-### Deploy the Function App
+### Create a Function App
 
 As the AAD Application is registered we can now deploy the Function App.
 
@@ -85,9 +98,9 @@ $parameters = @{
     resourceGroup = $resourceGroupName
     namePrefix = "litware-spsync"
     storageAccountName = "litwarespsyncdata"
-    appSharePointListName = "Ict-Info"
-    appSharePointResourcePrincipal = "https://m365x074331.sharepoint.com"
-    appSharePointSiteUrl = "https://m365x074331.sharepoint.com/it/"
+    appSharePointListName = "Shifts-List"
+    appSharePointResourcePrincipal = "https://<tenant>.sharepoint.com"
+    appSharePointSiteUrl = "https://<tenant>.sharepoint.com/<site>/"
     appTeamsTeamName = "Contoso IT"
     appApplicationId = $app.AppId
     appTenantName = $session.TenantDomain
@@ -161,7 +174,65 @@ Publish-AzWebapp -WebApp $functionApp -ArchivePath $deploymentFile
 Remove-Item $tmp.FullName -Recurse
 ```
 
+### Upgrade to newer version
+To upgrade existing Function App to newer code just execute a section [Deploy code into the Function App](#deploy-code-into-the-function-app) again.
+
 ## For debugging
+
+### Load data to JSON
+```powershell
+$variables = (Get-Content -Path "local.settings.json" | ConvertFrom-Json).Values
+
+$today = (Get-Date).AddMonths(-2)
+$startDate = [DateTime]::new($today.Year, $today.Month, 1)
+$endDate = $StartDate.AddMonths(3)
+
+$tenantName = $variables.TENANT_NAME
+$clientId = $variables.APPLICATION_ID
+$clientSecret = $variables.APPLICATION_SECRET
+$refreshToken = $variables.REFRESH_TOKEN
+$shiftsTeamName = $variables.TEAMS_NAME
+
+$token = New-AccessToken -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -RefreshToken $refreshToken
+$graphToken = Invoke-OnBehalfOfFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -AccessToken $token.AccessToken -Resource "https://graph.microsoft.com" | ConvertTo-AuthorizationHeaders
+
+$uri = "https://graph.microsoft.com/v1.0/me/joinedTeams"
+$response = Invoke-RestMethod -Method Get -Headers $graphToken -Uri $uri
+$team = $response.value | Where-Object { $_.displayName -eq $shiftsTeamName }
+
+$ci = [CultureInfo]::InvariantCulture
+$uri = "https://graph.microsoft.com/beta/teams/{0}/schedule/shifts?`$filter=sharedShift/startDateTime ge {1}T00:00:00.000Z and sharedShift/endDateTime le {2}T00:00:00.000Z" -f $team.id, $startDate.ToString("yyyy-MM-dd", $ci), $endDate.ToString("yyyy-MM-dd", $ci)
+$response = Invoke-WebRequest -Method Get -Headers $graphToken -Uri $uri
+Set-Content -Path "shifts.json" -Value $response.Content
+
+$shifts = $response.Content | ConvertFrom-Json
+foreach($shift in $shifts.value) {
+    $uri = "https://graph.microsoft.com/v1.0/users/{0}" -f $shift.userId
+    $userResponse = Invoke-WebRequest -Method Get -Headers $graphToken -Uri $uri
+    Set-Content -Path "user_$($shift.userId).json" -Value $userResponse.Content 
+}
+```
+
+### Import users from JSON
+```powershell
+Connect-AzureAD
+$domain = (Get-AzureADDomain | where IsInitial -eq True).Name
+
+$import = Get-ChildItem user_*.json
+$import | foreach {
+	$user = Get-Content $_ | ConvertFrom-Json
+
+	$upn = $user.userPrincipalName.Replace("@domain.tld", "@" + $domain)
+	
+	$existing = Get-AzureADUser -Filter "userPrincipalName eq '$upn'"
+	if(-not $existing) { 
+		$passwordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
+		$passwordProfile.Password = "FDSFDSFDSFSDFSD@4545"
+
+		New-AzureADUser -DisplayName $user.displayName -GivenName $user.givenName -JobTitle $user.jobTitle -Mobile $user.mobilePhone -Surname $user.surname -UserPrincipalName $upn -AccountEnabled $true -MailNickName ($user.mail.Split("@")[0]) -PasswordProfile $passwordProfile
+	}
+}
+```
 
 ### Mock functions for debugging
 ```powershell

@@ -13,7 +13,7 @@
 # for testing
 [System.Reflection.Assembly]::LoadFrom(".\modules\OauthHelper\NetCoreAssemblies\Microsoft.IdentityModel.Clients.ActiveDirectory.dll")
 $variables = (Get-Content -Path "local.settings.json" | ConvertFrom-Json).Values
-"REFRESH_TOKEN","TENANT_NAME","APPLICATION_ID","APPLICATION_SECRET","TEAMS_NAME","SP_SITE","SP_LIST","SP_RESOURCE_PRINCIPAL" | ForEach-Object {
+"REFRESH_TOKEN","TENANT_NAME","APPLICATION_ID","APPLICATION_SECRET","TEAMS_NAME","SP_SITE","SP_LIST","SP_RESOURCE_PRINCIPAL", "SYNC_MONTHS_PAST", "SYNC_MONTHS_FUTURE" | ForEach-Object {
     Set-Item -Path "env:$($_)" -Value $variables.$_
 }
 #>
@@ -29,8 +29,19 @@ function Invoke-Synchronization
     $site = $env:SP_SITE
     $listName = $env:SP_LIST
     $shiftsTeamName = $env:TEAMS_NAME
+    $syncMonthsPast = [int]$env:SYNC_MONTHS_PAST
+    $syncMonthsFuture = [int]$env:SYNC_MONTHS_FUTURE
 
     $functionStartedAt = Get-Date
+
+    # validate time ranges
+    if($syncMonthsPast -lt 0) {
+        $syncMonthsPast = 0
+    }
+
+    if($syncMonthsFuture -lt 0) {
+        $syncMonthsFuture = 0
+    }
 
     # Renew access keys
     $token = New-AccessToken -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -RefreshToken $refreshToken
@@ -39,9 +50,12 @@ function Invoke-Synchronization
     
     # Set time range
     $today = Get-Date
-    $today = $today.AddMonths(-2)
-    $StartDate = [DateTime]::new($today.Year, $today.Month, 1)
-    $EndDate = $StartDate.AddMonths(3)
+    $currentMonth = [DateTime]::new($today.Year, $today.Month, 1)
+
+    $StartDate = $currentMonth.AddMonths($syncMonthsPast * -1)
+    $EndDate = $currentMonth.AddMonths($syncMonthsFuture + 1) # +1 to always sync current month
+
+    Write-Host "Synchronization range is from $($StartDate.ToString("d")) to $($EndDate.ToString("d"))."
 
     # And sync Shifts in Teams team to SharePoint list
     Sync-ShiftsToSharePoint -StartDate $StartDate -EndDate $EndDate `
