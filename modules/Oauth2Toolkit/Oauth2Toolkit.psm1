@@ -78,7 +78,7 @@ function ConvertTo-AuthorizationHeaders
 {
     param(
         [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline)]
-        $response
+        $Response
     )
 
     $headers = @{
@@ -425,4 +425,115 @@ function Invoke-AdminConsentForApplication
     {
         throw "Admin consent failed"
     }
+}
+
+function Invoke-ClientCredentialsFlow {
+    param(
+        [string]$Tenant,
+        [Parameter(ParameterSetName='ClientCredential')]
+        [pscredential]$Client,
+        [Parameter(ParameterSetName='ClientExplicit')]
+        [string]$ClientId,
+        [Parameter(ParameterSetName='ClientExplicit')]
+        [string]$ClientSecret,
+        [string]$Resource = "https://graph.microsoft.com",
+        [string]$AuthorizationEndpoint = "https://login.microsoftonline.com/{0}/oauth2/token"
+    )
+
+    $authUrl = $AuthorizationEndpoint -f $Tenant
+    $parameters = @{
+        grant_type = "client_credentials"
+        client_secret = $ClientSecret
+        resource = $Resource
+        client_id = $ClientId
+    }
+
+    $response = Invoke-RestMethod -Uri $authUrl -Method Post -Body $parameters
+
+    $response
+}
+
+function New-Jwt {
+    param(
+        $Type = "JWT",
+        [Parameter(Mandatory = $True)]
+        [string]$Issuer = $null,
+        [int]$ValidforSeconds = 180,
+        [Parameter(Mandatory=$true)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
+        $Audience = $null,
+        $Subject = $null
+    )
+
+    $Algorithm = "RS256"
+    $exp = [int][double]::parse((Get-Date -Date $((Get-Date).addseconds($ValidforSeconds).ToUniversalTime()) -UFormat %s)) # Grab Unix Epoch Timestamp and add desired expiration.
+
+    [hashtable]$header = @{
+        alg = $Algorithm
+        typ = $type
+        x5t = [System.Convert]::ToBase64String($Certificate.GetCertHash())
+    }
+    [hashtable]$payload = @{
+        iss = $Issuer
+        exp = $exp
+        aud = $Audience
+        sub = $Subject
+    }
+
+    $headerjson = $header | ConvertTo-Json -Compress
+    $payloadjson = $payload | ConvertTo-Json -Compress
+    
+    $headerjsonbase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($headerjson)).Split('=')[0].Replace('+', '-').Replace('/', '_')
+    $payloadjsonbase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payloadjson)).Split('=')[0].Replace('+', '-').Replace('/', '_')
+
+    $jwt = $headerjsonbase64 + "." + $payloadjsonbase64
+    $toSign = [System.Text.Encoding]::UTF8.GetBytes($jwt)
+
+    $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+    if ($null -eq $rsa) { # Requiring the private key to be present; else cannot sign!
+        throw "There's no private key in the supplied certificate - cannot sign" 
+    }
+    else {
+        try { 
+            $signed = $rsa.SignData($toSign, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            $sig = [Convert]::ToBase64String($signed) -replace '\+','-' -replace '/','_' -replace '=' 
+        } catch { throw "Signing with SHA256 and Pkcs1 padding failed using private key $rsa" }
+    }
+
+    $jwt = $jwt + '.' + $sig
+
+    return $jwt
+}
+
+# https://docs.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-client-creds-grant-flow
+function Invoke-ClientCredentalsCertificateFlow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Tenant,
+        [string]$ClientId,
+        [Parameter(ParameterSetName = 'Thumbprint')]
+        [string]$CertificateThumbprint,
+        [Parameter(ParameterSetName = 'Certificate')]
+        [System.Security.Cryptography.X509Certificates.X509Certificate]$Certificate,
+
+        [string]$Resource = "https://graph.microsoft.com"
+    )
+
+    if($PSCmdlet.ParameterSetName -eq "Thumbprint") {
+        $certificate = Get-ChildItem Cert:\CurrentUser\My\$CertificateThumbprint
+    }
+
+    $jwt = New-Jwt -Subject $ClientId -Issuer $ClientId -ValidforSeconds 180 -Certificate $certificate -Audience "https://login.microsoftonline.com/$($Tenant)/oauth2/token"
+
+    $authUrl = "https://login.microsoftonline.com/{0}/oauth2/token" -f $Tenant
+    $parameters = @{
+        grant_type = "client_credentials"
+        resource = $Resource
+        client_id = $ClientId
+        client_assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+        client_assertion = $jwt
+    }
+
+    $response = Invoke-RestMethod -Uri $authUrl -Method Post -Body $parameters
+
+    $response
 }

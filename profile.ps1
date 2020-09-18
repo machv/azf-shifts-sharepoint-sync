@@ -43,10 +43,18 @@ function Invoke-Synchronization
         $syncMonthsFuture = 0
     }
 
-    # Renew access keys
-    $token = New-AccessToken -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -RefreshToken $refreshToken
-    $graphToken = Invoke-OnBehalfOfFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -AccessToken $token.AccessToken -Resource "https://graph.microsoft.com" | ConvertTo-AuthorizationHeaders
-    $SharePointToken = Invoke-OnBehalfOfFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -AccessToken $token.AccessToken -Resource $sharePointResourcePrincipal | ConvertTo-AuthorizationHeaders
+    # Get access keys (application identity)
+    $graphToken = Invoke-ClientCredentialsFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -Resource "https://graph.microsoft.com" | ConvertTo-AuthorizationHeaders
+    #$sharePointToken = Invoke-ClientCredentialsFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -Resource $sharePointResourcePrincipal | ConvertTo-AuthorizationHeaders
+    
+    $certPassword = "LS1setup!" | ConvertTo-SecureString -AsPlainText -Force
+    $certificate = Get-PfxCertificate -FilePath "E:\Scripts\Litco-SharePointShiftsSync.pfx" -Password $certPassword
+    $sharePointToken = Invoke-ClientCredentalsCertificateFlow -Tenant $tenantName -ClientId $clientId -Certificate $certificate -Resource $sharePointResourcePrincipal | ConvertTo-AuthorizationHeaders
+
+    # Renew access keys (delegated auth)
+    #$token = New-AccessToken -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -RefreshToken $refreshToken
+    #$graphToken = Invoke-OnBehalfOfFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -AccessToken $token.AccessToken -Resource "https://graph.microsoft.com" | ConvertTo-AuthorizationHeaders
+    #$SharePointToken = Invoke-OnBehalfOfFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -AccessToken $token.AccessToken -Resource $sharePointResourcePrincipal | ConvertTo-AuthorizationHeaders
     
     # Set time range
     $today = Get-Date

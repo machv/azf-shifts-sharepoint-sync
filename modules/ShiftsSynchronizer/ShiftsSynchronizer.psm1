@@ -18,11 +18,15 @@ function Invoke-EnsureSpUser
         $Token
     )
 
+    $headers = $Token.Clone()
+    $headers['Content-Type'] = "application/json;odata=verbose;charset=utf-8"
+    $headers['Accept'] = "application/json;odata=verbose;charset=utf-8"
+
     $payload = [PSCustomObject]@{
         "logonName" = $User.userPrincipalName
     }
     $uri = "{0}/_api/web/ensureuser" -f $Site
-    $response = Invoke-RestMethod -Method Post -Headers $Token -Uri $uri -Body ($payload | ConvertTo-Json)
+    $response = Invoke-RestMethod -Method Post -Headers $headers -Uri $uri -Body ($payload | ConvertTo-Json)
 
     $response.d
 }
@@ -48,6 +52,10 @@ function Add-SPShift
         [bool]$ShortenLastDay,
         [bool]$AsAllDayEvent = $true
     )
+
+    $headers = $Token.Clone()
+    $headers['Content-Type'] = "application/json;odata=verbose;charset=utf-8"
+    $headers['Accept'] = "application/json;odata=verbose;charset=utf-8"
 
     if($PsCmdlet.ParameterSetName -eq "LookupUser")
     {
@@ -94,7 +102,7 @@ function Add-SPShift
     $payload = ($payload | ConvertTo-Json)
     $payload = [System.Text.Encoding]::UTF8.GetBytes($payload)
     $uri = "{0}/_api/web/lists/GetByTitle('{1}')/items" -f $Site, $ListName
-    $r = Invoke-WebRequest -Method Post -Headers $Token -Uri $uri -Body $payload
+    $r = Invoke-WebRequest -Method Post -Headers $headers -Uri $uri -Body $payload
 
     Write-Debug (" * Inserting shift for {0} ({1} - {2})" -f $User.displayName, $StartDate, $EndDate)
 
@@ -142,8 +150,12 @@ function Get-SpListItem
         $Id
     )
 
+    $headers = $Token.Clone()
+    $headers['Content-Type'] = "application/json;odata=verbose;charset=utf-8"
+    $headers['Accept'] = "application/json;odata=verbose;charset=utf-8"
+
     $uri = "{0}/_api/web/lists/GetByTitle('{1}')/items({2})" -f $Site, $ListName, $Id
-    $response = Invoke-WebRequest -Method Get -Headers $Token -Uri $uri
+    $response = Invoke-WebRequest -Method Get -Headers $headers -Uri $uri
 
     $fixup = $response.Content -creplace '"Id":','"Id2":'
     $response = $fixup | ConvertFrom-Json
@@ -162,9 +174,13 @@ function Get-SpListItems
         [DateTime]$EndDate
     ) 
 
+    $headers = $Token.Clone()
+    $headers['Content-Type'] = "application/json;odata=verbose;charset=utf-8"
+    $headers['Accept'] = "application/json;odata=verbose;charset=utf-8"
+
     # https://www.c-sharpcorner.com/article/sharepoint-2013-using-rest-api-selecting-filtering-sortin/
     $uri = "{0}/_api/web/lists/GetByTitle('{1}')/items?`$filter=EventDate ge datetime'{2}' and EndDate le datetime'{3}'" -f $Site, $ListName, $StartDate.ToString("s", $ci), $EndDate.ToString("s", $ci)
-    $response = Invoke-WebRequest -Method Get -Headers $Token -Uri $uri
+    $response = Invoke-WebRequest -Method Get -Headers $headers -Uri $uri
     $fixup = $response.Content -creplace '"Id":','"Id2":'
     $response = $fixup | ConvertFrom-Json
 
@@ -181,8 +197,12 @@ function Remove-SpListItem
         $ItemId
     )
 
+    $headers = $Token.Clone()
+    $headers['Content-Type'] = "application/json;odata=verbose;charset=utf-8"
+    $headers['Accept'] = "application/json;odata=verbose;charset=utf-8"
+
     # Delete header set
-    $headers = New-ClonedObject -DeepCopyObject $Token
+    #$headers = New-ClonedObject -DeepCopyObject $Token
     $headers['X-HTTP-Method'] = "DELETE" 
     $headers['IF-MATCH'] = "*"
 
@@ -261,8 +281,10 @@ function Get-Shifts
         [DateTime]$EndDate
     )
     $ci = [CultureInfo]::InvariantCulture
-    $uri = "https://graph.microsoft.com/beta/teams/{0}/schedule/shifts?`$filter=sharedShift/startDateTime ge {1}T00:00:00.000Z and sharedShift/endDateTime le {2}T00:00:00.000Z" -f $TeamId, $StartDate.ToString("yyyy-MM-dd", $ci), $EndDate.ToString("yyyy-MM-dd", $ci)
-    $response = Invoke-RestMethod -Method Get -Headers $Token -Uri $uri
+    $uri = "https://graph.microsoft.com/v1.0/teams/{0}/schedule/shifts?`$filter=sharedShift/startDateTime ge {1}T00:00:00.000Z and sharedShift/endDateTime le {2}T00:00:00.000Z" -f $TeamId, $StartDate.ToString("yyyy-MM-dd", $ci), $EndDate.ToString("yyyy-MM-dd", $ci)
+    $headers = $Token.Clone()
+    $headers["MS-APP-ACTS-AS"] = New-Guid # Graph API requires User ID when working in Application Context, but any random guid will make it work
+    $response = Invoke-RestMethod -Method Get -Headers $headers -Uri $uri
     
     $response.value
 }
@@ -274,13 +296,19 @@ function Get-TeamsTeam
         $Name
     )
 
-    $uri = "https://graph.microsoft.com/v1.0/me/joinedTeams"
+    $uri = "https://graph.microsoft.com/v1.0/groups?`$filter=displayName eq '$($Name)'"
+
+    #$uri = "https://graph.microsoft.com/v1.0/me/joinedTeams"
     $response = Invoke-RestMethod -Method Get -Headers $Token -Uri $uri
     $team = $response.value | Where-Object { $_.displayName -eq $Name } # Out-GridView -Title "Select correct team" -OutputMode Single
 
     if(-not $team) 
     {
         throw "Requested Team not found -> please check the name"
+    }
+
+    if(-not("Team" -in $team.resourceProvisioningOptions)) {
+        throw "Specified group exists,but isn't Teams enabled"
     }
 
     $team
@@ -441,12 +469,12 @@ PS>                         -ShortenLastDay $true `
 PS>                         -Debug:$true # with verbose logging output
 
 #>
-
-    $SharePointToken['Content-Type'] = "application/json;odata=verbose;charset=utf-8"
-    $SharePointToken['Accept'] = "application/json;odata=verbose;charset=utf-8"
+    $headers = $SharePointToken.Clone()
+    $headers['Content-Type'] = "application/json;odata=verbose;charset=utf-8"
+    $headers['Accept'] = "application/json;odata=verbose;charset=utf-8"
     
     $commonParameters = @{
-        Token = $SharePointToken
+        Token = $headers
         Site = $Site
         ListName = $ListName
     }
