@@ -24,7 +24,8 @@ function Invoke-Synchronization
     $tenantName = $env:TENANT_NAME
     $clientId = $env:APPLICATION_ID
     $clientSecret = $env:APPLICATION_SECRET
-    $refreshToken = $env:REFRESH_TOKEN
+    $base64Certificate = $env:CERTIFICATE
+    $certificatePassword = $env:CERTIFICATE_PASSWORD
     $sharePointResourcePrincipal = $env:SP_RESOURCE_PRINCIPAL
     $site = $env:SP_SITE
     $listName = $env:SP_LIST
@@ -46,9 +47,17 @@ function Invoke-Synchronization
     # Get access keys (application identity)
     $graphToken = Invoke-ClientCredentialsFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -Resource "https://graph.microsoft.com" | ConvertTo-AuthorizationHeaders
     #$sharePointToken = Invoke-ClientCredentialsFlow -Tenant $tenantName -ClientId $clientId -ClientSecret $clientSecret -Resource $sharePointResourcePrincipal | ConvertTo-AuthorizationHeaders
-    
-    $certPassword = "LS1setup!" | ConvertTo-SecureString -AsPlainText -Force
-    $certificate = Get-PfxCertificate -FilePath "E:\Scripts\Litco-SharePointShiftsSync.pfx" -Password $certPassword
+
+    #$certPassword = "" | ConvertTo-SecureString -AsPlainText -Force
+    #$certificate = Get-PfxCertificate -FilePath "SharePointShiftsSync.pfx" -Password $certPassword
+    if($certificatePassword -and $certificatePassword.Length.Trim() -gt 0) {
+        $certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+        $certificateSecurePassword = $certificatePassword | ConvertTo-SecureString -AsPlainText -Force
+        $certificate.Import([System.Convert]::FromBase64String($base64Certificate), $certificateSecurePassword, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]"DefaultKeySet")
+    } else {
+        $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]([System.Convert]::FromBase64String($base64Certificate))
+    }
+
     $sharePointToken = Invoke-ClientCredentalsCertificateFlow -Tenant $tenantName -ClientId $clientId -Certificate $certificate -Resource $sharePointResourcePrincipal | ConvertTo-AuthorizationHeaders
 
     # Renew access keys (delegated auth)

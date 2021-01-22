@@ -110,6 +110,9 @@ $functionAppName = $deployment.Outputs["appName"].Value
 $keyVaultName = $deployment.Outputs["keyVaultName"].Value
 ```
 
+### SharePoint authentication
+When are Application credentials used instead of Delegated, OAuth token needs to be obtained using a certificate instead of just a plain client secret. Certificate can be directly generated using a Key Vault.
+
 ### Obtain secrets and store them in Key Vault
 
 In the login window login with service account credentials that is member of Teams team where shifts are stored and also don't forget to grant RW on SharePoint site with a calendar to that service account.
